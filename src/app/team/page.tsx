@@ -4,12 +4,14 @@
  * Team Dashboard - Bidding Interface
  * Real-time bidding interface for team users with budget tracking
  * Mobile-first responsive design with touch-optimized controls
+ * Updated to use backend-mediated SSE connections instead of direct WebSocket
  */
 
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { TeamRoute } from '@/components/auth'
+import { auctionConnection, AuctionEvent, ConnectionStatus } from '@/lib/auction-connection'
 import {
   CurrencyDollarIcon,
   ClockIcon,
@@ -74,7 +76,7 @@ interface AuctionState {
 
 function TeamDashboardContent() {
   const { data: session } = useSession()
-  const wsRef = useRef<WebSocket | null>(null)
+  const connectionStatusRef = useRef<ConnectionStatus | null>(null)
   const [auctionState, setAuctionState] = useState<AuctionState | null>(null)
   const [teamBudget, setTeamBudget] = useState<TeamBudget | null>(null)
   const [bidAmount, setBidAmount] = useState('')
@@ -84,6 +86,12 @@ function TeamDashboardContent() {
   const [success, setSuccess] = useState('')
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [watchlist, setWatchlist] = useState<string[]>([])
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
+    connected: false,
+    connectionId: null,
+    reconnectAttempts: 0
+  })
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
   
   // Mobile-specific state
   const [showBidSheet, setShowBidSheet] = useState(false)
@@ -97,9 +105,7 @@ function TeamDashboardContent() {
     initializeTeamDashboard()
     
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+      auctionConnection.disconnect()
     }
   }, [])
 
@@ -122,33 +128,33 @@ function TeamDashboardContent() {
     return () => clearInterval(interval)
   }, [auctionState?.timer])
 
-  const handleWebSocketMessage = (message: any) => {
-    console.log('Received WebSocket message:', message.type)
+  const handleAuctionEvent = (event: AuctionEvent) => {
+    console.log('Received auction event:', event.type)
     
-    switch (message.type) {
+    switch (event.type) {
       case 'connection:established':
-        console.log('WebSocket connection established')
+        console.log('✅ Auction connection established')
         break
         
       case 'auction:state':
-        setAuctionState(message.payload)
-        if (message.payload.timer) {
-          setTimeRemaining(message.payload.timer.remaining)
+        setAuctionState(event.payload)
+        if (event.payload.timer) {
+          setTimeRemaining(event.payload.timer.remaining)
         }
         break
         
       case 'bid:placed':
-        if (message.payload.teamId === session?.user.teamId) {
-          setSuccess(`Bid placed: ₹${(message.payload.amount / 100000).toFixed(1)}L`)
+        if (event.payload.teamId === session?.user.teamId) {
+          setSuccess(`Bid placed: ₹${(event.payload.amount / 100000).toFixed(1)}L`)
         }
         // Update current price if this is for the current lot
         setAuctionState(prev => {
-          if (prev?.currentLot?.id === message.payload.lotId) {
+          if (prev?.currentLot?.id === event.payload.lotId) {
             return {
               ...prev,
               currentLot: {
                 ...prev.currentLot,
-                currentPrice: message.payload.amount
+                currentPrice: event.payload.amount
               }
             }
           }
@@ -160,16 +166,18 @@ function TeamDashboardContent() {
         setSuccess('Bid cancelled successfully')
         break
         
-      case 'error':
-        setError(message.payload.message)
+      case 'bid:error':
+        setError(event.payload.message || 'Bid failed')
+        setBidding(false)
         break
         
-      case 'pong':
-        // Heartbeat response
+      case 'heartbeat':
+        // Connection health check
+        connectionStatusRef.current = auctionConnection.getConnectionStatus()
         break
         
       default:
-        console.log('Unknown WebSocket message type:', message.type)
+        console.log('Unknown auction event type:', event.type)
     }
   }
 
@@ -187,8 +195,8 @@ function TeamDashboardContent() {
         maxSquadSize: 25,
       })
 
-      // Connect to WebSocket for real-time updates
-      connectWebSocket()
+      // Connect to auction using new SSE-based service
+      await connectToAuction()
       
     } catch (error) {
       console.error('Failed to initialize dashboard:', error)
@@ -198,75 +206,74 @@ function TeamDashboardContent() {
     }
   }
 
-  const connectWebSocket = () => {
+  const connectToAuction = async () => {
     if (!session?.user?.id) return
     
     try {
-      // Connect to WebSocket server
-      const wsUrl = `ws://localhost:3001?userId=${session.user.id}&role=TEAM&auctionId=auction_1&token=temp_token`
-      const ws = new WebSocket(wsUrl)
+      setError('')
+      setReconnectAttempt(0)
       
-      ws.onopen = () => {
-        console.log('WebSocket connected')
-        wsRef.current = ws
-      }
-      
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error)
-        }
-      }
-      
-      ws.onclose = () => {
-        console.log('WebSocket disconnected')
-        wsRef.current = null
-        // Attempt reconnection after 3 seconds
-        setTimeout(() => {
-          if (session?.user?.id) {
-            connectWebSocket()
-          }
-        }, 3000)
-      }
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-      }
-      
-    } catch (error) {
-      console.error('Failed to connect WebSocket:', error)
-      // Fallback to mock data
-      setAuctionState({
-        id: 'auction_1',
-        status: 'IN_PROGRESS',
-        currentLot: {
-          id: 'lot_1',
-          player: {
-            id: 'player_1',
-            name: 'Virat Kohli',
-            role: 'BATSMAN',
-            country: 'India',
-            basePrice: 15000000,
-            isOverseas: false,
-            stats: {
-              matches: 200,
-              runs: 6000,
-              average: '45.2',
-              strikeRate: '131.5'
-            }
-          },
-          currentPrice: 85000000,
-          endsAt: new Date(Date.now() + 25000).toISOString(),
-          status: 'IN_PROGRESS'
+      const connected = await auctionConnection.connect({
+        auctionId: 'auction_1',
+        onEvent: handleAuctionEvent,
+        onError: (error) => {
+          console.error('❌ Team auction connection error:', error)
+          setError(`Connection error: ${error}`)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
         },
-        timer: {
-          remaining: 25000,
-          endsAt: new Date(Date.now() + 25000).toISOString(),
-          extensions: 0
+        onConnect: () => {
+          console.log('✅ Team connected to auction stream')
+          setError('')
+          setReconnectAttempt(0)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onDisconnect: () => {
+          console.log('🔌 Team disconnected from auction stream')
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onReconnect: (attempt) => {
+          console.log(`🔄 Team reconnection attempt ${attempt}`)
+          setReconnectAttempt(attempt)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
         }
       })
+      
+      if (!connected) {
+        // Fallback to mock data for development
+        console.log('📱 Using fallback mock data')
+        setAuctionState({
+          id: 'auction_1',
+          status: 'IN_PROGRESS',
+          currentLot: {
+            id: 'lot_1',
+            player: {
+              id: 'player_1',
+              name: 'Virat Kohli',
+              role: 'BATSMAN',
+              country: 'India',
+              basePrice: 15000000,
+              isOverseas: false,
+              stats: {
+                matches: 200,
+                runs: 6000,
+                average: '45.2',
+                strikeRate: '131.5'
+              }
+            },
+            currentPrice: 85000000,
+            endsAt: new Date(Date.now() + 25000).toISOString(),
+            status: 'IN_PROGRESS'
+          },
+          timer: {
+            remaining: 25000,
+            endsAt: new Date(Date.now() + 25000).toISOString(),
+            extensions: 0
+          }
+        })
+      }
+    } catch (error) {
+      console.error('❌ Failed to connect to auction:', error)
+      setError('Failed to initialize auction connection')
     }
   }
 
@@ -289,46 +296,30 @@ function TeamDashboardContent() {
     setError('')
     
     try {
-      // Use WebSocket for real-time bidding if available
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'bid.place',
-          payload: {
-            lotId: auctionState.currentLot.id,
-            amount: amount,
-            batchId: Date.now().toString()
-          }
-        }))
-        
-        setBidAmount('')
-      } else {
-        // Fallback to HTTP API
-        const response = await fetch('/api/bids', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            lotId: auctionState.currentLot.id,
-            amount: amount
-          })
-        })
-        
-        const data = await response.json()
-        
-        if (data.success) {
-          setSuccess(`Bid placed: ₹${(amount / 100000).toFixed(1)}L`)
-          setBidAmount('')
-          
-          // Update current price
-          setAuctionState(prev => prev ? {
-            ...prev,
-            currentLot: prev.currentLot ? {
-              ...prev.currentLot,
-              currentPrice: amount
-            } : undefined
-          } : null)
-        } else {
-          throw new Error(data.error || 'Failed to place bid')
+      // Use the new auction connection service for bidding
+      const result = await auctionConnection.sendBid({
+        lotId: auctionState.currentLot.id,
+        amount: amount,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          batchId: Date.now().toString()
         }
+      })
+      
+      if (result.success) {
+        setSuccess(`Bid placed: ₹${(amount / 100000).toFixed(1)}L`)
+        setBidAmount('')
+        
+        // Update current price optimistically
+        setAuctionState(prev => prev ? {
+          ...prev,
+          currentLot: prev.currentLot ? {
+            ...prev.currentLot,
+            currentPrice: amount
+          } : undefined
+        } : null)
+      } else {
+        throw new Error(result.error || 'Failed to place bid')
       }
       
     } catch (error) {

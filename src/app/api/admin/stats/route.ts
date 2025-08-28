@@ -42,21 +42,21 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
       }),
       
       // Total teams
-      prisma.team.count(seasonId ? { where: seasonFilter } : {}),
+      prisma.team.count(seasonId ? { where: seasonFilter } : undefined),
       
       // Total players
-      prisma.player.count(seasonId ? { where: seasonFilter } : {}),
+      prisma.player.count(seasonId ? { where: seasonFilter } : undefined),
       
       // Total bids processed
       prisma.bid.count(seasonId ? {
         where: {
           lot: {
             auction: {
-              season: seasonFilter
+              seasonId: seasonId
             }
           }
         }
-      } : {}),
+      } : undefined),
       
       // Auction value statistics
       prisma.lot.aggregate({
@@ -64,7 +64,7 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
           status: 'SOLD',
           ...(seasonId && {
             auction: {
-              season: seasonFilter
+              seasonId: seasonId
             }
           })
         },
@@ -83,7 +83,8 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
       }),
       
       // Team spending statistics
-      prisma.team.aggregate(seasonId ? { where: seasonFilter } : {}, {
+      prisma.team.aggregate({
+        ...(seasonId && { where: seasonFilter }),
         _sum: {
           budgetTotal: true
         },
@@ -101,7 +102,7 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
         where: seasonId ? {
           lot: {
             auction: {
-              season: seasonFilter
+              seasonId: seasonId
             }
           }
         } : {},
@@ -114,7 +115,7 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
           },
           lot: {
             select: {
-              lotNumber: true,
+              order: true,
               player: {
                 select: {
                   name: true
@@ -151,7 +152,7 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
       amount: bid.amount,
       timestamp: bid.createdAt.toISOString(),
       auction: bid.lot.auction.name,
-      lotNumber: bid.lot.lotNumber
+      lotNumber: bid.lot.order
     }))
 
     // Get live auction metrics if there's an active auction
@@ -201,7 +202,7 @@ export const GET = withAdmin(async (request: NextRequest, user) => {
         completedLots,
         progress: (completedLots / activeAuction._count.lots) * 100,
         currentLot: activeAuction.currentLot ? {
-          lotNumber: activeAuction.currentLot.lotNumber,
+          lotNumber: activeAuction.currentLot.order,
           playerName: activeAuction.currentLot.player.name,
           currentBid: activeAuction.currentLot.bids[0]?.amount || activeAuction.currentLot.player.basePrice,
           currentBidder: activeAuction.currentLot.bids[0]?.team.displayName || null

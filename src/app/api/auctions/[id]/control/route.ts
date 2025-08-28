@@ -14,8 +14,8 @@ import { auctionEngine } from '@/lib/auction-engine'
 export const POST = withAdmin(
   async (
     request: NextRequest,
-    user,
-    { params }: { params: { id: string } }
+    { params }: { params: { id: string } },
+    user
   ) => {
     try {
       const body = await parseJsonBody(request)
@@ -57,7 +57,7 @@ export const POST = withAdmin(
           if (!data?.lotId) {
             return createApiResponse(undefined, 'Lot ID required for force sell', 400)
           }
-          await auctionEngine.forceSellLot(auctionId, data.lotId)
+          await auctionEngine.forceSellLot(auctionId, data.lotId as string)
           result = { message: 'Lot force sold successfully' }
           break
 
@@ -65,7 +65,7 @@ export const POST = withAdmin(
           if (!data?.lotId) {
             return createApiResponse(undefined, 'Lot ID required for mark unsold', 400)
           }
-          await auctionEngine.markLotUnsold(auctionId, data.lotId)
+          await auctionEngine.markLotUnsold(auctionId, data.lotId as string)
           result = { message: 'Lot marked as unsold successfully' }
           break
 

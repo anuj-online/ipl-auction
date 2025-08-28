@@ -3,12 +3,14 @@
 /**
  * Teams Status Monitoring Page
  * Real-time team status dashboard for admin monitoring during auctions
+ * Updated to use backend-mediated SSE connections instead of direct WebSocket
  */
 
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { auctionConnection, AuctionEvent, ConnectionStatus } from '@/lib/auction-connection'
 import {
   ArrowLeftIcon,
   UserGroupIcon,
@@ -55,7 +57,7 @@ interface Season {
 export default function TeamsStatusPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const wsRef = useRef<WebSocket | null>(null)
+  const connectionStatusRef = useRef<ConnectionStatus | null>(null)
   
   const [teams, setTeams] = useState<TeamStatus[]>([])
   const [seasons, setSeasons] = useState<Season[]>([])
@@ -63,7 +65,12 @@ export default function TeamsStatusPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
+    connected: false,
+    connectionId: null,
+    reconnectAttempts: 0
+  })
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
   const [autoRefresh, setAutoRefresh] = useState(true)
 
   useEffect(() => {
@@ -77,9 +84,7 @@ export default function TeamsStatusPage() {
     initializeStatusMonitor()
     
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+      auctionConnection.disconnect()
     }
   }, [session, status, router])
 
@@ -116,8 +121,8 @@ export default function TeamsStatusPage() {
         }
       }
 
-      // Connect to WebSocket for real-time updates
-      connectWebSocket()
+      // Connect to auction using new SSE-based service
+      await connectToAuction()
       
     } catch (error) {
       console.error('Failed to initialize status monitor:', error)
@@ -127,58 +132,58 @@ export default function TeamsStatusPage() {
     }
   }
 
-  const connectWebSocket = () => {
+  const connectToAuction = async () => {
+    if (!session?.user?.id) return
+    
     try {
-      const wsUrl = `ws://localhost:8080`
-      const ws = new WebSocket(wsUrl)
+      setError('')
+      setReconnectAttempt(0)
       
-      ws.onopen = () => {
-        setWsConnected(true)
-        console.log('Connected to WebSocket for team status updates')
-        
-        // Subscribe to team status updates
-        ws.send(JSON.stringify({
-          type: 'subscribe',
-          channel: 'admin:team-status'
-        }))
-      }
-      
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error)
+      const connected = await auctionConnection.connect({
+        auctionId: 'current',
+        onEvent: handleAuctionEvent,
+        onError: (error) => {
+          console.error('❌ Team status connection error:', error)
+          setError(`Connection error: ${error}`)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onConnect: () => {
+          console.log('✅ Team status monitor connected')
+          setError('')
+          setReconnectAttempt(0)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onDisconnect: () => {
+          console.log('🔌 Team status monitor disconnected')
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onReconnect: (attempt) => {
+          console.log(`🔄 Team status reconnection attempt ${attempt}`)
+          setReconnectAttempt(attempt)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
         }
-      }
+      })
       
-      ws.onclose = () => {
-        setWsConnected(false)
-        console.log('WebSocket connection closed')
-        
-        // Reconnect after 5 seconds
-        setTimeout(connectWebSocket, 5000)
+      if (!connected) {
+        setError('Failed to establish connection to auction')
       }
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        setWsConnected(false)
-      }
-      
-      wsRef.current = ws
     } catch (error) {
-      console.error('Failed to connect to WebSocket:', error)
-      setWsConnected(false)
+      console.error('❌ Failed to connect to auction:', error)
+      setError('Failed to initialize team status connection')
     }
   }
 
-  const handleWebSocketMessage = (message: any) => {
-    switch (message.type) {
+  const handleAuctionEvent = (event: AuctionEvent) => {
+    switch (event.type) {
+      case 'connection:established':
+        console.log('✅ Team status connection established')
+        break
+        
       case 'team:status':
         setTeams(prev => 
           prev.map(team => 
-            team.id === message.payload.teamId 
-              ? { ...team, ...message.payload.status }
+            team.id === event.payload.teamId 
+              ? { ...team, ...event.payload.status }
               : team
           )
         )
@@ -188,12 +193,12 @@ export default function TeamsStatusPage() {
       case 'team:activity':
         setTeams(prev => 
           prev.map(team => 
-            team.id === message.payload.teamId 
+            team.id === event.payload.teamId 
               ? {
                   ...team,
-                  lastActivity: message.payload.timestamp,
+                  lastActivity: event.payload.timestamp,
                   recentActivity: [
-                    message.payload.activity,
+                    event.payload.activity,
                     ...team.recentActivity.slice(0, 4)
                   ]
                 }
@@ -206,10 +211,15 @@ export default function TeamsStatusPage() {
         setTeams(prev => 
           prev.map(team => ({
             ...team,
-            isConnected: message.payload.connectedTeams.includes(team.id),
-            connectionStatus: message.payload.connectedTeams.includes(team.id) ? 'online' : 'offline'
+            isConnected: event.payload.connectedTeams.includes(team.id),
+            connectionStatus: event.payload.connectedTeams.includes(team.id) ? 'online' : 'offline'
           }))
         )
+        break
+        
+      case 'heartbeat':
+        // Connection health check
+        connectionStatusRef.current = auctionConnection.getConnectionStatus()
         break
     }
   }
@@ -313,10 +323,13 @@ export default function TeamsStatusPage() {
 
             <div className="flex items-center space-x-4">
               <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
-                wsConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                connectionStatus.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
               }`}>
                 <WifiIcon className="w-4 h-4" />
-                <span>{wsConnected ? 'Live' : 'Offline'}</span>
+                <span>
+                  {connectionStatus.connected ? 'Live' : 
+                   reconnectAttempt > 0 ? `Reconnecting (${reconnectAttempt})` : 'Offline'}
+                </span>
               </div>
               
               <Link

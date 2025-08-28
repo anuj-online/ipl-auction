@@ -4,12 +4,14 @@
  * Live Auction Control Interface
  * Real-time auction management dashboard for administrators
  * Features: Start/pause/resume auctions, manage lot flow, monitor bidding activity
+ * Updated to use backend-mediated SSE connections instead of direct WebSocket
  */
 
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { auctionConnection, AuctionEvent, ConnectionStatus } from '@/lib/auction-connection'
 import {
   PlayIcon,
   PauseIcon,
@@ -88,7 +90,7 @@ interface Team {
 export default function LiveAuctionControl() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const wsRef = useRef<WebSocket | null>(null)
+  const connectionStatusRef = useRef<ConnectionStatus | null>(null)
   
   const [auctionState, setAuctionState] = useState<AuctionState | null>(null)
   const [teams, setTeams] = useState<Team[]>([])
@@ -96,7 +98,12 @@ export default function LiveAuctionControl() {
   const [actionLoading, setActionLoading] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [wsConnected, setWsConnected] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
+    connected: false,
+    connectionId: null,
+    reconnectAttempts: 0
+  })
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
 
   useEffect(() => {
     if (status === 'loading') return
@@ -109,9 +116,7 @@ export default function LiveAuctionControl() {
     initializeLiveControl()
     
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+      auctionConnection.disconnect()
     }
   }, [session, status, router])
 
@@ -133,8 +138,8 @@ export default function LiveAuctionControl() {
         setTeams(teamsData.data)
       }
 
-      // Connect to WebSocket for real-time updates
-      connectWebSocket()
+      // Connect to auction using new SSE-based service
+      await connectToAuction()
       
     } catch (error) {
       console.error('Failed to initialize live control:', error)
@@ -144,105 +149,51 @@ export default function LiveAuctionControl() {
     }
   }
 
-  const connectWebSocket = () => {
+  const connectToAuction = async () => {
     if (!session?.user?.id) return
     
-    // Close existing connection if any
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.close()
-    }
-    
     try {
-      // Try multiple WebSocket server URLs
-      const wsUrls = [
-        `ws://localhost:3001?userId=${session.user.id}&role=ADMIN&auctionId=current&token=admin_token`,
-        `ws://localhost:8080?userId=${session.user.id}&role=ADMIN`,
-        `ws://127.0.0.1:8080?userId=${session.user.id}&role=ADMIN`
-      ]
+      setError('')
+      setReconnectAttempt(0)
       
-      let currentUrlIndex = 0
-      const tryConnect = () => {
-        if (currentUrlIndex >= wsUrls.length) {
-          console.error('All WebSocket URLs failed')
-          setError('Unable to establish live connection. Please check if the WebSocket server is running.')
-          return
-        }
-        
-        const wsUrl = wsUrls[currentUrlIndex]
-        console.log(`Attempting WebSocket connection to: ${wsUrl}`)
-        
-        const ws = new WebSocket(wsUrl)
-        
-        // Set a connection timeout
-        const connectionTimeout = setTimeout(() => {
-          if (ws.readyState === WebSocket.CONNECTING) {
-            ws.close()
-            currentUrlIndex++
-            tryConnect()
-          }
-        }, 5000)
-        
-        ws.onopen = () => {
-          clearTimeout(connectionTimeout)
-          console.log('Admin WebSocket connected successfully')
-          setWsConnected(true)
+      const connected = await auctionConnection.connect({
+        auctionId: 'current',
+        onEvent: handleAuctionEvent,
+        onError: (error) => {
+          console.error('❌ Auction connection error:', error)
+          setError(`Connection error: ${error}`)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onConnect: () => {
+          console.log('✅ Admin connected to auction stream')
           setError('')
-          wsRef.current = ws
-          
-          // Send admin subscription
-          ws.send(JSON.stringify({
-            type: 'admin:subscribe',
-            channels: ['auction:updates', 'bids:live', 'teams:status']
-          }))
+          setReconnectAttempt(0)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onDisconnect: () => {
+          console.log('🔌 Admin disconnected from auction stream')
+          setConnectionStatus(auctionConnection.getConnectionStatus())
+        },
+        onReconnect: (attempt) => {
+          console.log(`🔄 Reconnection attempt ${attempt}`)
+          setReconnectAttempt(attempt)
+          setConnectionStatus(auctionConnection.getConnectionStatus())
         }
-        
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data)
-            handleWebSocketMessage(message)
-          } catch (error) {
-            console.error('Error parsing WebSocket message:', error)
-          }
-        }
-        
-        ws.onclose = (event) => {
-          clearTimeout(connectionTimeout)
-          console.log('Admin WebSocket disconnected:', event.code, event.reason)
-          setWsConnected(false)
-          wsRef.current = null
-          
-          // Only attempt reconnection if not manually closed
-          if (event.code !== 1000 && session?.user?.id) {
-            setTimeout(() => {
-              console.log('Attempting to reconnect...')
-              connectWebSocket()
-            }, 3000)
-          }
-        }
-        
-        ws.onerror = (error) => {
-          clearTimeout(connectionTimeout)
-          console.error('Admin WebSocket error:', error)
-          setWsConnected(false)
-          
-          // Try next URL
-          currentUrlIndex++
-          setTimeout(tryConnect, 1000)
-        }
+      })
+      
+      if (!connected) {
+        setError('Failed to establish connection to auction')
       }
-      
-      tryConnect()
-      
     } catch (error) {
-      console.error('Failed to initialize WebSocket:', error)
-      setError('Failed to initialize live connection')
+      console.error('❌ Failed to connect to auction:', error)
+      setError('Failed to initialize auction connection')
     }
   }
 
-  const handleWebSocketMessage = (message: any) => {
-    switch (message.type) {
+  const handleAuctionEvent = (event: AuctionEvent) => {
+    switch (event.type) {
       case 'auction:state':
-        setAuctionState(message.payload)
+        setAuctionState(event.payload)
         break
         
       case 'bid:placed':
@@ -252,17 +203,17 @@ export default function LiveAuctionControl() {
             ...prev,
             currentLot: {
               ...prev.currentLot,
-              currentPrice: message.payload.amount,
+              currentPrice: event.payload.amount,
               currentBidder: {
-                teamId: message.payload.teamId,
-                teamName: message.payload.teamName
+                teamId: event.payload.teamId,
+                teamName: event.payload.teamName
               },
               bidHistory: [
                 {
-                  teamId: message.payload.teamId,
-                  teamName: message.payload.teamName,
-                  amount: message.payload.amount,
-                  timestamp: new Date().toISOString()
+                  teamId: event.payload.teamId,
+                  teamName: event.payload.teamName,
+                  amount: event.payload.amount,
+                  timestamp: event.timestamp || new Date().toISOString()
                 },
                 ...prev.currentLot.bidHistory.slice(0, 9)
               ]
@@ -272,16 +223,46 @@ export default function LiveAuctionControl() {
         break
         
       case 'teams:status':
-        setTeams(message.payload)
+        setTeams(event.payload)
         break
         
       case 'connection:count':
         setAuctionState(prev => prev ? {
           ...prev,
-          connectedTeams: message.payload.teams,
-          connectedViewers: message.payload.viewers
+          connectedTeams: event.payload.teams,
+          connectedViewers: event.payload.viewers
         } : null)
         break
+        
+      case 'auction:started':
+      case 'auction:paused':
+      case 'auction:resumed':
+      case 'lot:started':
+      case 'lot:ended':
+        // Refresh auction state for major events
+        refreshAuctionState()
+        break
+        
+      case 'connection:established':
+        console.log('🔗 Connection established:', event.payload)
+        break
+        
+      case 'heartbeat':
+        // Connection health check
+        connectionStatusRef.current = auctionConnection.getConnectionStatus()
+        break
+    }
+  }
+
+  const refreshAuctionState = async () => {
+    try {
+      const response = await fetch('/api/auctions/current')
+      const data = await response.json()
+      if (data.success) {
+        setAuctionState(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to refresh auction state:', error)
     }
   }
 
@@ -293,24 +274,23 @@ export default function LiveAuctionControl() {
     setSuccess('')
     
     try {
-      const response = await fetch(`/api/auctions/${auctionState.id}/control`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action, data }),
+      // Use the new admin control method through connection service
+      const result = await auctionConnection.sendAdminControl(action, {
+        auctionId: auctionState.id,
+        ...data
       })
       
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Action failed')
+      if (!result.success) {
+        throw new Error(result.error || 'Action failed')
       }
       
-      const result = await response.json()
-      setSuccess(result.message || `${action} executed successfully`)
+      setSuccess(`${action.replace('_', ' ')} executed successfully`)
+      
+      // Refresh auction state after successful action
+      setTimeout(refreshAuctionState, 500)
       
     } catch (error) {
-      console.error('Action failed:', error)
+      console.error('❌ Action failed:', error)
       setError(error instanceof Error ? error.message : 'Action failed')
     } finally {
       setActionLoading('')
@@ -384,15 +364,20 @@ export default function LiveAuctionControl() {
             
             <div className="flex items-center space-x-4">
               <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
-                wsConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                connectionStatus.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
               }`}>
-                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                <span>{wsConnected ? 'Live Connected' : 'Disconnected'}</span>
+                <div className={`w-2 h-2 rounded-full ${
+                  connectionStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                }`} />
+                <span>
+                  {connectionStatus.connected ? 'Live Connected' : 
+                   reconnectAttempt > 0 ? `Reconnecting (${reconnectAttempt})` : 'Disconnected'}
+                </span>
               </div>
               
-              {!wsConnected && (
+              {!connectionStatus.connected && (
                 <button
-                  onClick={connectWebSocket}
+                  onClick={connectToAuction}
                   className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-full transition-colors"
                 >
                   Reconnect
