@@ -7,6 +7,7 @@ import { getServerSession } from 'next-auth'
 import { NextRequest } from 'next/server'
 import { authOptions, AuthUser, getCurrentUser } from './auth'
 import { UserRole } from './validations'
+import { prisma } from './prisma'
 
 /**
  * Get current session from server context
@@ -78,15 +79,34 @@ export async function canAccessTeam(targetTeamId: string): Promise<boolean> {
 }
 
 /**
+ * Enhanced team access verification with database validation
+ */
+export async function verifyTeamAccess(userId: string, teamId: string): Promise<boolean> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { team: true }
+    })
+    
+    if (!user) return false
+    if (user.role === 'ADMIN') return true
+    return user.teamId === teamId && user.team?.id === teamId
+  } catch (error) {
+    console.error('Error verifying team access:', error)
+    return false
+  }
+}
+
+/**
  * API route session wrapper
  */
-export async function withAuth(
-  handler: (request: NextRequest, user: AuthUser) => Promise<Response>
+export function withAuth(
+  handler: (request: NextRequest, user: AuthUser, context?: any) => Promise<Response>
 ) {
-  return async (request: NextRequest) => {
+  return async (request: NextRequest, context?: any) => {
     try {
       const user = await requireAuth()
-      return await handler(request, user)
+      return await handler(request, user, context)
     } catch (error) {
       return Response.json(
         { error: error instanceof Error ? error.message : 'Authentication failed' },
@@ -100,11 +120,11 @@ export async function withAuth(
  * API route role-based wrapper
  */
 export function withRole(requiredRoles: UserRole[]) {
-  return function(handler: (request: NextRequest, user: AuthUser) => Promise<Response>) {
-    return async (request: NextRequest) => {
+  return function(handler: (request: NextRequest, context: any, user: AuthUser) => Promise<Response>) {
+    return async (request: NextRequest, context?: any) => {
       try {
         const user = await requireRole(requiredRoles)
-        return await handler(request, user)
+        return await handler(request, context, user)
       } catch (error) {
         return Response.json(
           { error: error instanceof Error ? error.message : 'Authorization failed' },
@@ -126,6 +146,38 @@ export const withAdmin = withRole(['ADMIN'])
 export const withTeam = withRole(['TEAM'])
 
 /**
+ * Enhanced team wrapper with database-backed validation
+ */
+export function withTeamEnhanced(
+  handler: (request: NextRequest, context: any, user: AuthUser, teamId: string) => Promise<Response>
+) {
+  return withAuth(async (request: NextRequest, user: AuthUser, context?: any) => {
+    // Ensure user has TEAM role
+    if (user.role !== 'TEAM' && user.role !== 'ADMIN') {
+      return createApiResponse(undefined, 'Team access required', 403)
+    }
+
+    // Extract team ID from URL params
+    const url = new URL(request.url)
+    const pathParts = url.pathname.split('/')
+    const teamsIndex = pathParts.findIndex(part => part === 'teams')
+    const teamId = pathParts[teamsIndex + 1]
+
+    if (!teamId) {
+      return createApiResponse(undefined, 'Team ID not found in request', 400)
+    }
+
+    // Verify team access with database validation
+    const hasAccess = await verifyTeamAccess(user.id, teamId)
+    if (!hasAccess) {
+      return createApiResponse(undefined, 'Team access denied', 403)
+    }
+
+    return handler(request, context, user, teamId)
+  })
+}
+
+/**
  * Extract user from request headers (for WebSocket auth)
  */
 export async function getUserFromHeaders(headers: Headers): Promise<AuthUser | null> {
@@ -133,13 +185,38 @@ export async function getUserFromHeaders(headers: Headers): Promise<AuthUser | n
   if (!authHeader?.startsWith('Bearer ')) return null
   
   const token = authHeader.slice(7)
-  // In a real implementation, you'd validate the JWT token here
-  // For now, we'll use session-based auth
   
   try {
+    // Try to validate JWT token
+    const validatedUser = await validateSessionToken(token)
+    if (validatedUser) {
+      return validatedUser
+    }
+    
+    // Fallback to session-based auth
     const user = await getAuthenticatedUser()
     return user
-  } catch {
+  } catch (error) {
+    console.error('Error validating user from headers:', error)
+    return null
+  }
+}
+
+/**
+ * Enhanced JWT validation for cross-service auth
+ */
+export async function validateSessionToken(token: string): Promise<AuthUser | null> {
+  try {
+    const jwt = require('jsonwebtoken')
+    const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!) as any
+    
+    if (decoded.sub) {
+      return await getCurrentUser(decoded.sub)
+    }
+    
+    return null
+  } catch (error) {
+    console.error('JWT validation failed:', error)
     return null
   }
 }

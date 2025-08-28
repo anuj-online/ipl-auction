@@ -5,7 +5,7 @@
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { withTeam, createApiResponse, handleApiError } from '@/lib/session'
+import { withTeamEnhanced, createApiResponse, handleApiError } from '@/lib/session'
 
 interface RouteParams {
   params: { 
@@ -17,12 +17,7 @@ interface RouteParams {
 /**
  * DELETE /api/teams/[id]/watchlist/[entryId] - Remove from watchlist (Team only)
  */
-export const DELETE = withTeam(async (request: NextRequest, { params }: RouteParams, user) => {
-  // Verify user belongs to this team
-  if (user.teamId !== params.id) {
-    return createApiResponse(undefined, 'Access denied', 403)
-  }
-
+export const DELETE = withTeamEnhanced(async (request: NextRequest, { params }: RouteParams, user, teamId) => {
   try {
     const watchlistEntry = await prisma.watchlist.findUnique({
       where: { id: params.entryId },
@@ -32,7 +27,7 @@ export const DELETE = withTeam(async (request: NextRequest, { params }: RoutePar
       return createApiResponse(undefined, 'Watchlist entry not found', 404)
     }
 
-    if (watchlistEntry.teamId !== params.id) {
+    if (watchlistEntry.teamId !== teamId) {
       return createApiResponse(undefined, 'Access denied', 403)
     }
 

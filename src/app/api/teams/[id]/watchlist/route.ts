@@ -5,7 +5,7 @@
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { withTeam, createApiResponse, handleApiError, parseJsonBody } from '@/lib/session'
+import { withTeamEnhanced, createApiResponse, handleApiError, parseJsonBody } from '@/lib/session'
 
 interface RouteParams {
   params: { id: string }
@@ -56,12 +56,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 /**
  * POST /api/teams/[id]/watchlist - Add player to watchlist (Team only)
  */
-export const POST = withTeam(async (request: NextRequest, { params }: RouteParams, user) => {
-  // Verify user belongs to this team
-  if (user.teamId !== params.id) {
-    return createApiResponse(undefined, 'Access denied', 403)
-  }
-
+export const POST = withTeamEnhanced(async (request: NextRequest, { params }: RouteParams, user, teamId) => {
   const body = await parseJsonBody(request)
   const { playerId, maxBid, priority } = body
 
@@ -90,7 +85,7 @@ export const POST = withTeam(async (request: NextRequest, { params }: RouteParam
     const existing = await prisma.watchlist.findUnique({
       where: {
         teamId_playerId: {
-          teamId: params.id,
+          teamId: teamId,
           playerId,
         },
       },
@@ -102,7 +97,7 @@ export const POST = withTeam(async (request: NextRequest, { params }: RouteParam
 
     const watchlistEntry = await prisma.watchlist.create({
       data: {
-        teamId: params.id,
+        teamId: teamId,
         playerId,
         maxBid: maxBid || null,
         priority: priority || null,

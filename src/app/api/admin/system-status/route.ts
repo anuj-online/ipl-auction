@@ -121,17 +121,16 @@ async function testDatabaseHealth() {
 
 async function testWebSocketServer() {
   try {
-    // Try to connect to WebSocket server
+    // Try to connect to WebSocket server health endpoints
     const wsUrls = [
-      'ws://localhost:8080',
-      'ws://localhost:3001'
+      'http://localhost:3003/health', // Primary WebSocket port
+      'http://localhost:3001/health', // Secondary WebSocket port
+      'http://localhost:8080/health'  // Alternative port
     ]
     
     for (const url of wsUrls) {
       try {
-        // In a real implementation, you'd make an HTTP request to a health endpoint
-        // or maintain a registry of WebSocket server status
-        const response = await fetch(url.replace('ws://', 'http://') + '/health', {
+        const response = await fetch(url, {
           method: 'GET',
           signal: AbortSignal.timeout(2000)
         })
@@ -141,7 +140,9 @@ async function testWebSocketServer() {
           return {
             status: 'online' as const,
             connectedClients: data.connectedClients || 0,
-            serverUptime: data.uptime || 0
+            serverUptime: data.uptime || 0,
+            activeServer: url,
+            port: data.port || 'unknown'
           }
         }
       } catch (error) {

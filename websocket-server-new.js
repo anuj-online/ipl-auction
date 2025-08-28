@@ -81,7 +81,7 @@ class ApiClient {
 class WebSocketAuctionServer {
   constructor(port = 3001) {
     this.port = port
-    this.server = createServer()
+    this.server = createServer(this.handleHttpRequest.bind(this))
     this.wss = new WebSocket.Server({ 
       server: this.server,
       verifyClient: this.verifyClient.bind(this)
@@ -97,6 +97,33 @@ class WebSocketAuctionServer {
     
     this.setupWebSocketHandling()
     this.setupHeartbeat()
+  }
+
+  /**
+   * Handle HTTP requests (for health checks)
+   */
+  handleHttpRequest(req, res) {
+    const { pathname } = parse(req.url)
+    
+    if (pathname === '/health') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      })
+      
+      res.end(JSON.stringify({
+        status: 'healthy',
+        connectedClients: this.wss.clients.size,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        port: this.port
+      }))
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('Not Found')
+    }
   }
 
   /**
