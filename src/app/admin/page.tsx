@@ -30,10 +30,38 @@ interface DashboardStats {
   totalValue: number
 }
 
+interface SystemStatus {
+  database: {
+    status: 'healthy' | 'warning' | 'error'
+    responseTime: number
+  }
+  webSocket: {
+    status: 'online' | 'offline' | 'unknown'
+    connectedClients: number
+  }
+  application: {
+    status: 'healthy' | 'warning' | 'error'
+    uptime: number
+    memoryUsage: {
+      percentage: number
+    }
+  }
+  activeConnections: {
+    teams: number
+    viewers: number
+    admins: number
+  }
+  meta: {
+    overallStatus: 'healthy' | 'warning' | 'error'
+    checkTime: string
+  }
+}
+
 export default function AdminDashboard() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -45,36 +73,39 @@ export default function AdminDashboard() {
     }
 
     fetchDashboardStats()
+    fetchSystemStatus()
+    
+    // Set up periodic refresh for live monitoring
+    const interval = setInterval(() => {
+      fetchSystemStatus()
+    }, 30000) // Refresh system status every 30 seconds
+    
+    return () => clearInterval(interval)
   }, [session, status, router])
 
   const fetchDashboardStats = async () => {
     try {
-      const [seasonsRes, auctionsRes, teamsRes, playersRes] = await Promise.all([
-        fetch('/api/seasons'),
-        fetch('/api/auctions'),
-        fetch('/api/teams'),
-        fetch('/api/players')
-      ])
+      const response = await fetch('/api/admin/stats')
+      const data = await response.json()
 
-      const [seasonsData, auctionsData, teamsData, playersData] = await Promise.all([
-        seasonsRes.json(),
-        auctionsRes.json(),
-        teamsRes.json(),
-        playersRes.json()
-      ])
-
-      const activeAuctions = auctionsData.success 
-        ? auctionsData.data.auctions.filter((a: any) => a.status === 'IN_PROGRESS').length
-        : 0
-
-      setStats({
-        totalSeasons: seasonsData.success ? seasonsData.data.seasons.length : 0,
-        activeAuctions,
-        totalTeams: teamsData.success ? teamsData.data.teams.length : 0,
-        totalPlayers: playersData.success ? playersData.data.players.length : 0,
-        totalBidsProcessed: 0, // TODO: Implement bid count API
-        totalValue: 0, // TODO: Calculate from team spending
-      })
+      if (data.success) {
+        setStats({
+          totalSeasons: data.data.totalSeasons,
+          activeAuctions: data.data.activeAuctions,
+          totalTeams: data.data.totalTeams,
+          totalPlayers: data.data.totalPlayers,
+          totalBidsProcessed: data.data.totalBidsProcessed,
+          totalValue: data.data.totalValue,
+        })
+        
+        // Update recent activities with real data
+        if (data.data.recentActivity && data.data.recentActivity.length > 0) {
+          const activities = data.data.recentActivity.slice(0, 4).map((activity: any) => activity.description)
+          setRecentActivities(activities)
+        }
+      } else {
+        throw new Error(data.error || 'Failed to fetch stats')
+      }
     } catch (error) {
       console.error('Failed to fetch dashboard stats:', error)
       // Fallback to default values
@@ -88,6 +119,42 @@ export default function AdminDashboard() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchSystemStatus = async () => {
+    try {
+      const response = await fetch('/api/admin/system-status')
+      const data = await response.json()
+      
+      if (data.success) {
+        setSystemStatus(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch system status:', error)
+      // Set fallback status
+      setSystemStatus({
+        database: { status: 'unknown', responseTime: 0 },
+        webSocket: { status: 'unknown', connectedClients: 0 },
+        application: { status: 'unknown', uptime: 0, memoryUsage: { percentage: 0 } },
+        activeConnections: { teams: 0, viewers: 0, admins: 0 },
+        meta: { overallStatus: 'unknown', checkTime: new Date().toISOString() }
+      } as any)
+    }
+  }
+
+  const formatUptime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    return `${hours}h ${minutes}m`
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'healthy': case 'online': return 'text-green-800 bg-green-100'
+      case 'warning': return 'text-yellow-800 bg-yellow-100'
+      case 'error': case 'offline': return 'text-red-800 bg-red-100'
+      default: return 'text-gray-800 bg-gray-100'
     }
   }
 
@@ -134,12 +201,12 @@ export default function AdminDashboard() {
     },
   ]
 
-  const recentActivities = [
+  const [recentActivities, setRecentActivities] = useState([
     'IPL 2024 season created',
     '8 teams added to season',
     '25 players imported successfully',
     'Auction lobby prepared',
-  ]
+  ])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -177,7 +244,7 @@ export default function AdminDashboard() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -229,6 +296,36 @@ export default function AdminDashboard() {
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Total Players</dt>
                   <dd className="text-lg font-medium text-gray-900">{stats?.totalPlayers || 0}</dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <ClockIcon className="h-8 w-8 text-indigo-600" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="text-sm font-medium text-gray-500 truncate">Total Bids</dt>
+                  <dd className="text-lg font-medium text-gray-900">{stats?.totalBidsProcessed || 0}</dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <CurrencyDollarIcon className="h-8 w-8 text-emerald-600" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="text-sm font-medium text-gray-500 truncate">Total Value</dt>
+                  <dd className="text-lg font-medium text-gray-900">
+                    {stats?.totalValue ? `₹${(stats.totalValue / 10000000).toFixed(1)}Cr` : '₹0'}
+                  </dd>
                 </dl>
               </div>
             </div>
@@ -330,25 +427,88 @@ export default function AdminDashboard() {
             {/* System Status */}
             <div className="bg-white rounded-lg shadow mt-6">
               <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">System Status</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-gray-900">System Status</h3>
+                  {systemStatus && (
+                    <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      getStatusColor(systemStatus.meta.overallStatus)
+                    }`}>
+                      {systemStatus.meta.overallStatus.charAt(0).toUpperCase() + systemStatus.meta.overallStatus.slice(1)}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Database</span>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                    Healthy
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">WebSocket Server</span>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                    Online
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Active Connections</span>
-                  <span className="text-sm font-medium text-gray-900">0</span>
-                </div>
+                {systemStatus ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Database</span>
+                      <div className="flex items-center space-x-2">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          getStatusColor(systemStatus.database.status)
+                        }`}>
+                          {systemStatus.database.status}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {systemStatus.database.responseTime}ms
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">WebSocket Server</span>
+                      <div className="flex items-center space-x-2">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          getStatusColor(systemStatus.webSocket.status)
+                        }`}>
+                          {systemStatus.webSocket.status}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {systemStatus.webSocket.connectedClients} clients
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Application</span>
+                      <div className="flex items-center space-x-2">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          getStatusColor(systemStatus.application.status)
+                        }`}>
+                          {systemStatus.application.status}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {formatUptime(systemStatus.application.uptime)}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Memory Usage</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {systemStatus.application.memoryUsage.percentage}%
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Active Connections</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {systemStatus.activeConnections.teams + systemStatus.activeConnections.viewers + systemStatus.activeConnections.admins}
+                      </span>
+                    </div>
+                    
+                    <div className="pt-2 border-t border-gray-200">
+                      <p className="text-xs text-gray-500">
+                        Last updated: {new Date(systemStatus.meta.checkTime).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500 mx-auto"></div>
+                    <p className="text-sm text-gray-500 mt-2">Loading system status...</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

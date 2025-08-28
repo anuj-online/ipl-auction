@@ -147,42 +147,95 @@ export default function LiveAuctionControl() {
   const connectWebSocket = () => {
     if (!session?.user?.id) return
     
+    // Close existing connection if any
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.close()
+    }
+    
     try {
-      const ws = new WebSocket(`ws://localhost:3001?userId=${session.user.id}&role=ADMIN&auctionId=current&token=admin_token`)
+      // Try multiple WebSocket server URLs
+      const wsUrls = [
+        `ws://localhost:3001?userId=${session.user.id}&role=ADMIN&auctionId=current&token=admin_token`,
+        `ws://localhost:8080?userId=${session.user.id}&role=ADMIN`,
+        `ws://127.0.0.1:8080?userId=${session.user.id}&role=ADMIN`
+      ]
       
-      ws.onopen = () => {
-        console.log('Admin WebSocket connected')
-        setWsConnected(true)
-        wsRef.current = ws
-      }
-      
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error)
+      let currentUrlIndex = 0
+      const tryConnect = () => {
+        if (currentUrlIndex >= wsUrls.length) {
+          console.error('All WebSocket URLs failed')
+          setError('Unable to establish live connection. Please check if the WebSocket server is running.')
+          return
+        }
+        
+        const wsUrl = wsUrls[currentUrlIndex]
+        console.log(`Attempting WebSocket connection to: ${wsUrl}`)
+        
+        const ws = new WebSocket(wsUrl)
+        
+        // Set a connection timeout
+        const connectionTimeout = setTimeout(() => {
+          if (ws.readyState === WebSocket.CONNECTING) {
+            ws.close()
+            currentUrlIndex++
+            tryConnect()
+          }
+        }, 5000)
+        
+        ws.onopen = () => {
+          clearTimeout(connectionTimeout)
+          console.log('Admin WebSocket connected successfully')
+          setWsConnected(true)
+          setError('')
+          wsRef.current = ws
+          
+          // Send admin subscription
+          ws.send(JSON.stringify({
+            type: 'admin:subscribe',
+            channels: ['auction:updates', 'bids:live', 'teams:status']
+          }))
+        }
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            handleWebSocketMessage(message)
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error)
+          }
+        }
+        
+        ws.onclose = (event) => {
+          clearTimeout(connectionTimeout)
+          console.log('Admin WebSocket disconnected:', event.code, event.reason)
+          setWsConnected(false)
+          wsRef.current = null
+          
+          // Only attempt reconnection if not manually closed
+          if (event.code !== 1000 && session?.user?.id) {
+            setTimeout(() => {
+              console.log('Attempting to reconnect...')
+              connectWebSocket()
+            }, 3000)
+          }
+        }
+        
+        ws.onerror = (error) => {
+          clearTimeout(connectionTimeout)
+          console.error('Admin WebSocket error:', error)
+          setWsConnected(false)
+          
+          // Try next URL
+          currentUrlIndex++
+          setTimeout(tryConnect, 1000)
         }
       }
       
-      ws.onclose = () => {
-        console.log('Admin WebSocket disconnected')
-        setWsConnected(false)
-        wsRef.current = null
-        // Attempt reconnection after 3 seconds
-        setTimeout(() => {
-          if (session?.user?.id) {
-            connectWebSocket()
-          }
-        }, 3000)
-      }
-      
-      ws.onerror = (error) => {
-        console.error('Admin WebSocket error:', error)
-      }
+      tryConnect()
       
     } catch (error) {
-      console.error('Failed to connect WebSocket:', error)
+      console.error('Failed to initialize WebSocket:', error)
+      setError('Failed to initialize live connection')
     }
   }
 
@@ -333,9 +386,18 @@ export default function LiveAuctionControl() {
               <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
                 wsConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
               }`}>
-                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span>{wsConnected ? 'Connected' : 'Disconnected'}</span>
+                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                <span>{wsConnected ? 'Live Connected' : 'Disconnected'}</span>
               </div>
+              
+              {!wsConnected && (
+                <button
+                  onClick={connectWebSocket}
+                  className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-full transition-colors"
+                >
+                  Reconnect
+                </button>
+              )}
               
               <div className={`px-3 py-1 rounded-full text-sm font-medium ${
                 auctionState.status === 'IN_PROGRESS' ? 'bg-green-100 text-green-800' :
