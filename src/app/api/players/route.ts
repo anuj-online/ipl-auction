@@ -172,4 +172,4 @@ export const POST = withAdmin(async (request: NextRequest) => {
   } catch (error) {
     return handleApiError(error)
   }
-}
+})

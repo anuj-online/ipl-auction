@@ -181,7 +181,7 @@ export const POST = withTeam(async (request: NextRequest, user) => {
     })
 
     if (!result.success) {
-      return createApiResponse(undefined, result.error, 400)
+      return createApiResponse(undefined, result.reason || result.error || 'Bid failed', 400)
     }
 
     return createApiResponse({

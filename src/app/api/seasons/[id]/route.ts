@@ -255,4 +255,4 @@ export const DELETE = withAdmin(
       message: 'Season deleted successfully',
     })
   }
-)"
+)

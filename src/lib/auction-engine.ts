@@ -312,6 +312,28 @@ export class AuctionEngine extends EventEmitter {
   }
 
   /**
+   * Place a bid (wrapper for processBid for API compatibility)
+   */
+  async placeBid(bid: BidRequest): Promise<BidResult> {
+    // Validate required fields
+    if (!bid.lotId || !bid.teamId || !bid.amount) {
+      return { success: false, reason: 'Missing required bid parameters' }
+    }
+
+    // Find the auction for this lot
+    const lot = await prisma.lot.findUnique({
+      where: { id: bid.lotId },
+      include: { auction: true }
+    })
+
+    if (!lot) {
+      return { success: false, reason: 'Lot not found' }
+    }
+
+    return this.processBid(lot.auctionId, bid)
+  }
+
+  /**
    * Process a bid
    */
   async processBid(auctionId: string, bid: BidRequest): Promise<BidResult> {
@@ -387,7 +409,12 @@ export class AuctionEngine extends EventEmitter {
         amount: bid.amount,
         timestamp: bidRecord.createdAt.toISOString()
       },
-      newPrice: bid.amount
+      newPrice: bid.amount,
+      lot: {
+        id: bid.lotId,
+        currentPrice: bid.amount,
+        status: 'IN_PROGRESS'
+      }
     }
   }
 
@@ -654,7 +681,7 @@ export class AuctionEngine extends EventEmitter {
   }
 
   /**
-   * Event management
+   * Event management with WebSocket integration
    */
   private async emitEvent(auctionId: string, eventData: Omit<AuctionEventType, 'id' | 'sequence' | 'timestamp'>): Promise<void> {
     const sequence = (this.eventSequence.get(auctionId) || 0) + 1
@@ -670,8 +697,7 @@ export class AuctionEngine extends EventEmitter {
       }
     })
 
-    // Emit to WebSocket listeners
-    this.emit('auction:event', {
+    const eventPayload = {
       auctionId,
       event: {
         id: event.id,
@@ -680,7 +706,32 @@ export class AuctionEngine extends EventEmitter {
         sequence: event.sequence,
         timestamp: event.createdAt.toISOString()
       }
-    })
+    }
+
+    // Emit to internal event listeners (for WebSocket server)
+    this.emit('auction:event', eventPayload)
+    
+    // Also emit specific event types for easier handling
+    this.emit(`auction:${event.type.toLowerCase()}`, eventPayload)
+    
+    // If in development or WebSocket server is available, try to broadcast
+    if (process.env.NODE_ENV === 'development') {
+      this.broadcastToWebSocket(auctionId, eventPayload)
+    }
+  }
+
+  /**
+   * Broadcast event to WebSocket server (if available)
+   */
+  private broadcastToWebSocket(auctionId: string, eventPayload: any): void {
+    // In production, this would use a proper event bus or message queue
+    // For development, we'll emit to the global event system
+    try {
+      process.emit('auction:websocket', eventPayload)
+    } catch (error) {
+      // Silently fail if no WebSocket server is listening
+      console.debug('WebSocket broadcast failed:', error.message)
+    }
   }
 
   /**

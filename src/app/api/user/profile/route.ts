@@ -1,2 +1,27 @@
 /**
- * User Profile API Route\n * Get current user profile information\n */\n\nimport { NextRequest } from 'next/server'\nimport { requireAuth, createApiResponse, handleApiError } from '@/lib/session'\n\nexport async function GET(request: NextRequest) {\n  try {\n    const user = await requireAuth()\n    \n    return createApiResponse({\n      user: {\n        id: user.id,\n        email: user.email,\n        name: user.name,\n        role: user.role,\n        teamId: user.teamId,\n        teamName: user.teamName,\n      }\n    })\n\n  } catch (error) {\n    return handleApiError(error)\n  }\n}"
+ * User Profile API Route
+ * Get current user profile information
+ */
+
+import { NextRequest } from 'next/server'
+import { requireAuth, createApiResponse, handleApiError } from '@/lib/session'
+
+export async function GET(request: NextRequest) {
+  try {
+    const user = await requireAuth()
+    
+    return createApiResponse({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        teamId: user.teamId,
+        teamName: user.teamName,
+      }
+    })
+
+  } catch (error) {
+    return handleApiError(error)
+  }
+}

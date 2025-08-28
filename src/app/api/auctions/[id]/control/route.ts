@@ -92,4 +92,4 @@ export const POST = withAdmin(
       return handleApiError(error)
     }
   }
-)"
+)

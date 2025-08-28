@@ -6,6 +6,76 @@
 const WebSocket = require('ws')
 const { createServer } = require('http')
 const { parse } = require('url')
+const fs = require('fs')
+const path = require('path')
+
+// Import auction engine - In production this would be properly compiled TypeScript
+// For now, we'll create a simple HTTP client to communicate with the Next.js API
+const http = require('http')
+const https = require('https')
+
+/**
+ * API Client for communicating with Next.js backend
+ */
+class ApiClient {
+  constructor(baseUrl = 'http://localhost:3000') {
+    this.baseUrl = baseUrl
+  }
+
+  async makeRequest(path, options = {}) {
+    return new Promise((resolve, reject) => {
+      const url = `${this.baseUrl}${path}`
+      const requestOptions = {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
+        },
+        ...options
+      }
+
+      const req = (url.startsWith('https') ? https : http).request(url, requestOptions, (res) => {
+        let data = ''
+        res.on('data', chunk => data += chunk)
+        res.on('end', () => {
+          try {
+            const result = JSON.parse(data)
+            resolve(result)
+          } catch (e) {
+            reject(new Error('Invalid JSON response'))
+          }
+        })
+      })
+
+      req.on('error', reject)
+      
+      if (options.body) {
+        req.write(JSON.stringify(options.body))
+      }
+      
+      req.end()
+    })
+  }
+
+  async placeBid(lotId, teamId, amount, authToken) {
+    return this.makeRequest('/api/bids', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: { lotId, amount }
+    })
+  }
+
+  async getAuctionState(auctionId, authToken) {
+    return this.makeRequest(`/api/auctions/current?auctionId=${auctionId}`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    })
+  }
+}
 
 // WebSocket Auction Server
 class WebSocketAuctionServer {
@@ -17,10 +87,13 @@ class WebSocketAuctionServer {
       verifyClient: this.verifyClient.bind(this)
     })
     
+    // API client for communicating with Next.js backend
+    this.apiClient = new ApiClient()
+    
     // Store client connections by auction and user
     this.connections = new Map() // auctionId -> Set<WebSocket>
     this.userConnections = new Map() // userId -> WebSocket
-    this.clientData = new Map() // WebSocket -> { userId, role, auctionId }
+    this.clientData = new Map() // WebSocket -> { userId, role, auctionId, authToken }
     
     this.setupWebSocketHandling()
     this.setupHeartbeat()
@@ -56,9 +129,10 @@ class WebSocketAuctionServer {
       const auctionId = query.auctionId
       const userId = query.userId || 'anonymous'
       const role = query.role || 'VIEWER'
+      const authToken = query.token || req.headers.authorization?.replace('Bearer ', '')
       
       // Store client data
-      this.clientData.set(ws, { userId, role, auctionId })
+      this.clientData.set(ws, { userId, role, auctionId, authToken })
       this.userConnections.set(userId, ws)
       
       // Add to auction room
@@ -170,76 +244,85 @@ class WebSocketAuctionServer {
       return
     }
     
-    console.log('Processing bid:', payload)
-    
-    // Simulate bid processing
-    const bidResult = {
-      success: true,
-      bid: {
-        id: 'bid_' + Date.now(),
-        amount: payload.amount,
-        timestamp: new Date().toISOString()
-      },
-      newPrice: payload.amount
+    if (!clientData.authToken) {
+      this.sendError(ws, 'Authentication required')
+      return
     }
     
-    // Send confirmation to bidder
-    this.sendToClient(ws, {
-      type: 'bid:placed',
-      payload: bidResult
-    })
+    console.log('Processing bid via API:', payload)
     
-    // Broadcast to auction room
-    this.broadcastToAuction(clientData.auctionId, {
-      type: 'bid:placed',
-      payload: {
-        lotId: payload.lotId,
-        teamId: clientData.userId,
-        amount: payload.amount,
-        timestamp: new Date().toISOString()
+    try {
+      // Place bid via API
+      const result = await this.apiClient.placeBid(
+        payload.lotId, 
+        clientData.userId, 
+        payload.amount,
+        clientData.authToken
+      )
+      
+      if (result.success) {
+        // Send confirmation to bidder
+        this.sendToClient(ws, {
+          type: 'bid:placed',
+          payload: result.data
+        })
+        
+        // Broadcast to auction room
+        this.broadcastToAuction(clientData.auctionId, {
+          type: 'bid:update',
+          payload: {
+            lotId: payload.lotId,
+            teamId: clientData.userId,
+            amount: payload.amount,
+            timestamp: new Date().toISOString()
+          }
+        }, ws) // Exclude sender
+      } else {
+        // Send error to bidder
+        this.sendError(ws, result.error || 'Bid failed')
       }
-    }, ws) // Exclude sender
+    } catch (error) {
+      console.error('Bid placement error:', error)
+      this.sendError(ws, 'Internal server error')
+    }
   }
 
   /**
    * Send current auction state to client
    */
   async sendAuctionState(ws, auctionId) {
-    const mockState = {
-      id: auctionId,
-      status: 'IN_PROGRESS',
-      currentLotId: 'lot_123',
-      currentLot: {
-        id: 'lot_123',
-        player: {
-          id: 'player_1',
-          name: 'Virat Kohli',
-          role: 'BATSMAN',
-          country: 'India',
-          basePrice: 2000000,
-          isOverseas: false,
-          stats: {
-            matches: 200,
-            runs: 6000,
-            average: '45.2',
-            strikeRate: '131.5'
-          }
-        },
-        status: 'IN_PROGRESS',
-        currentPrice: 8500000,
-        endsAt: new Date(Date.now() + 25000).toISOString()
-      },
-      timer: {
-        remaining: 25000,
-        endsAt: new Date(Date.now() + 25000).toISOString(),
-        extensions: 0
-      }
+    const clientData = this.clientData.get(ws)
+    
+    if (!clientData.authToken) {
+      this.sendError(ws, 'Authentication required for auction state')
+      return
     }
     
-    this.sendToClient(ws, {
-      type: 'auction:state',
-      payload: mockState
-    })
+    try {
+      // Get current auction state from API
+      const stateResult = await this.apiClient.getAuctionState(auctionId, clientData.authToken)
+      
+      if (stateResult.success) {
+        this.sendToClient(ws, {
+          type: 'auction:state',
+          payload: stateResult.data
+        })
+      } else {
+        console.error('Failed to get auction state:', stateResult.error)
+        // Send minimal state as fallback
+        this.sendToClient(ws, {
+          type: 'auction:state',
+          payload: {
+            id: auctionId,
+            status: 'NOT_STARTED',
+            message: 'Unable to load auction state'
+          }
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching auction state:', error)
+      this.sendError(ws, 'Failed to load auction state')
+    }
   }
 
   /**

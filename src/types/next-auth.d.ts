@@ -94,7 +94,13 @@ export interface BidResult {
     timestamp: string
   }
   reason?: string
+  error?: string
   newPrice?: number
+  lot?: {
+    id: string
+    currentPrice: number
+    status: string
+  }
 }
 
 export interface WatchlistItem {
