@@ -95,7 +95,7 @@ export default function TeamStrategyPlanner() {
     if (status === 'loading') return
     
     if (!session || session.user.role !== 'TEAM') {
-      router.push('/auth/login')
+      router.push('/auth/signin')
       return
     }
 

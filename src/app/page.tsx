@@ -3,6 +3,9 @@
  * Modern, responsive landing page with features showcase and role-based onboarding
  */
 
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowRightIcon, PlayIcon, ChartBarIcon, CurrencyDollarIcon, ClockIcon, DevicePhoneMobileIcon, GlobeAltIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { CheckIcon } from '@heroicons/react/24/solid'
@@ -28,7 +31,7 @@ export default function LandingPage() {
               Demo
             </Link>
             <Link
-              href="/auth/login"
+              href="/auth/signin"
               className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
             >
               Sign In
@@ -38,7 +41,7 @@ export default function LandingPage() {
           {/* Mobile menu button */}
           <div className="md:hidden">
             <Link
-              href="/auth/login"
+              href="/auth/signin"
               className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
             >
               Sign In

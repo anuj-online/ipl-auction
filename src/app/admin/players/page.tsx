@@ -78,7 +78,7 @@ export default function AdminPlayersPage() {
     if (status === 'loading') return
     
     if (!session || session.user.role !== 'ADMIN') {
-      router.push('/auth/login')
+      router.push('/auth/signin')
       return
     }
 

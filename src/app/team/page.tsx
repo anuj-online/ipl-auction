@@ -8,8 +8,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { TeamRoute } from '@/components/auth'
 import {
   CurrencyDollarIcon,
   ClockIcon,
@@ -20,7 +20,8 @@ import {
   CheckCircleIcon,
   PlayIcon,
   Bars3Icon,
-  BellIcon
+  BellIcon,
+  ClipboardDocumentListIcon
 } from '@heroicons/react/24/outline'
 import { HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid'
 import {
@@ -71,9 +72,8 @@ interface AuctionState {
   }
 }
 
-export default function TeamDashboard() {
-  const { data: session, status } = useSession()
-  const router = useRouter()
+function TeamDashboardContent() {
+  const { data: session } = useSession()
   const wsRef = useRef<WebSocket | null>(null)
   const [auctionState, setAuctionState] = useState<AuctionState | null>(null)
   const [teamBudget, setTeamBudget] = useState<TeamBudget | null>(null)
@@ -92,13 +92,8 @@ export default function TeamDashboard() {
   const [customBidAmount, setCustomBidAmount] = useState('')
 
   useEffect(() => {
-    if (status === 'loading') return
-    
-    if (!session || session.user.role !== 'TEAM') {
-      router.push('/auth/login')
-      return
-    }
-
+    // Session and role validation is handled by TeamRoute wrapper
+    console.log('Team dashboard - User authenticated as team member')
     initializeTeamDashboard()
     
     return () => {
@@ -106,7 +101,7 @@ export default function TeamDashboard() {
         wsRef.current.close()
       }
     }
-  }, [session, status, router])
+  }, [])
 
   // Timer countdown effect
   useEffect(() => {
@@ -897,5 +892,14 @@ export default function TeamDashboard() {
         )}
       </main>
     </div>
+  )
+}
+
+// Wrap with TeamRoute for protection
+export default function TeamDashboard() {
+  return (
+    <TeamRoute>
+      <TeamDashboardContent />
+    </TeamRoute>
   )
 }

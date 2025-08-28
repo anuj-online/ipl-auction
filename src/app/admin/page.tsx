@@ -7,8 +7,8 @@
 
 import { useState, useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { AdminRoute } from '@/components/auth'
 import {
   ChartBarIcon,
   UserGroupIcon,
@@ -57,21 +57,21 @@ interface SystemStatus {
   }
 }
 
-export default function AdminDashboard() {
-  const { data: session, status } = useSession()
-  const router = useRouter()
+function AdminDashboardContent() {
+  const { data: session } = useSession()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [recentActivities, setRecentActivities] = useState([
+    'IPL 2024 season created',
+    '8 teams added to season',
+    '25 players imported successfully',
+    'Auction lobby prepared',
+  ])
 
   useEffect(() => {
-    if (status === 'loading') return
-    
-    if (!session || session.user.role !== 'ADMIN') {
-      router.push('/auth/login')
-      return
-    }
-
+    // Session and role validation is handled by AdminRoute wrapper
+    console.log('Admin dashboard - User authenticated as admin')
     fetchDashboardStats()
     fetchSystemStatus()
     
@@ -81,7 +81,7 @@ export default function AdminDashboard() {
     }, 30000) // Refresh system status every 30 seconds
     
     return () => clearInterval(interval)
-  }, [session, status, router])
+  }, [])
 
   const fetchDashboardStats = async () => {
     try {
@@ -158,16 +158,12 @@ export default function AdminDashboard() {
     }
   }
 
-  if (status === 'loading' || loading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-orange-500"></div>
       </div>
     )
-  }
-
-  if (!session || session.user.role !== 'ADMIN') {
-    return null
   }
 
   const quickActions = [
@@ -201,13 +197,6 @@ export default function AdminDashboard() {
     },
   ]
 
-  const [recentActivities, setRecentActivities] = useState([
-    'IPL 2024 season created',
-    '8 teams added to season',
-    '25 players imported successfully',
-    'Auction lobby prepared',
-  ])
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -227,11 +216,11 @@ export default function AdminDashboard() {
             
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">
-                Welcome, {session.user.name || session.user.email}
+                Welcome, {session?.user?.name || session?.user?.email || 'Admin'}
               </span>
               <button
                 onClick={() => {
-                  signOut({ callbackUrl: '/auth/login' })
+                  signOut({ callbackUrl: '/auth/signin' })
                 }}
                 className="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-medium text-gray-700 transition-colors"
               >
@@ -561,5 +550,14 @@ export default function AdminDashboard() {
         </div>
       </main>
     </div>
+  )
+}
+
+// Wrap with AdminRoute for protection
+export default function AdminDashboard() {
+  return (
+    <AdminRoute>
+      <AdminDashboardContent />
+    </AdminRoute>
   )
 }

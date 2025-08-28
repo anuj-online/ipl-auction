@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import { AuthenticatedRoute } from '@/components/auth'
 import { 
   TrophyIcon, 
   UserGroupIcon, 
@@ -73,8 +74,8 @@ interface AuctionState {
   unsoldLots: number
 }
 
-export default function ViewerInterface() {
-  const { data: session, status } = useSession()
+function ViewerInterfaceContent() {
+  const { data: session } = useSession()
   const router = useRouter()
   
   const [auctionState, setAuctionState] = useState<AuctionState | null>(null)
@@ -84,25 +85,11 @@ export default function ViewerInterface() {
   const [wsConnected, setWsConnected] = useState(false)
   const [viewerCount, setViewerCount] = useState(0)
 
-  // Redirect if user has admin/team role
+  // Initialize viewer interface
   useEffect(() => {
-    if (status === 'loading') return
-    
-    if (!session) {
-      router.push('/auth/login?callbackUrl=/viewer')
-      return
-    }
-
-    if (session.user?.role === 'ADMIN') {
-      router.push('/admin')
-      return
-    }
-
-    if (session.user?.role === 'TEAM') {
-      router.push('/team')
-      return
-    }
-  }, [session, status, router])
+    console.log('Viewer interface - User authenticated')
+    // WebSocket and data fetching initialization will happen here
+  }, [])
 
   // WebSocket connection for live updates
   useEffect(() => {
@@ -466,5 +453,14 @@ export default function ViewerInterface() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Wrap with AuthenticatedRoute for protection (allows any authenticated user)
+export default function ViewerInterface() {
+  return (
+    <AuthenticatedRoute>
+      <ViewerInterfaceContent />
+    </AuthenticatedRoute>
   )
 }

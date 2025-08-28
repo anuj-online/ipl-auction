@@ -1,0 +1,51 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - generic [ref=e8]: IPL
+          - generic [ref=e9]: Auction Pro
+        - generic [ref=e10]:
+          - generic [ref=e11]:
+            - generic [ref=e12]: Welcome,
+            - generic [ref=e13]: Mumbai Indians Manager
+            - generic [ref=e14]: TEAM
+          - button "Sign Out" [ref=e15]:
+            - img [ref=e16]
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - heading "Mumbai Indians" [level=1] [ref=e20]
+        - paragraph [ref=e21]: Ready to bid in the auction
+      - generic [ref=e22]:
+        - generic [ref=e24]:
+          - img [ref=e25]
+          - generic [ref=e27]:
+            - heading "Budget Remaining" [level=3] [ref=e28]
+            - paragraph [ref=e29]: ₹10.0 Cr
+        - generic [ref=e31]:
+          - img [ref=e32]
+          - generic [ref=e34]:
+            - heading "Squad Size" [level=3] [ref=e35]
+            - paragraph [ref=e36]: 0/25
+        - generic [ref=e38]:
+          - img [ref=e39]
+          - generic [ref=e41]:
+            - heading "Auction Status" [level=3] [ref=e42]
+            - paragraph [ref=e43]: Waiting to Start
+      - generic [ref=e44]:
+        - link "Enter Auction Room Join the live bidding session" [ref=e45] [cursor=pointer]:
+          - /url: /team
+          - img [ref=e46] [cursor=pointer]
+          - heading "Enter Auction Room" [level=3] [ref=e49] [cursor=pointer]
+          - paragraph [ref=e50] [cursor=pointer]: Join the live bidding session
+        - generic [ref=e51]:
+          - img [ref=e52]
+          - heading "Player Watchlist" [level=3] [ref=e54]
+          - paragraph [ref=e55]: Manage your preferred players
+  - button "Open Next.js Dev Tools" [ref=e61] [cursor=pointer]:
+    - img [ref=e62] [cursor=pointer]
+  - alert [ref=e65]
+```

@@ -69,7 +69,7 @@ export default function AdminTeamsPage() {
     if (status === 'loading') return
     
     if (!session || session.user.role !== 'ADMIN') {
-      router.push('/auth/login')
+      router.push('/auth/signin')
       return
     }
 
