@@ -1,12 +1,340 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// IPL Auction System Prisma Schema
+// Complete database schema for real-time cricket player auctions
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MANAGEMENT & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String?
+  name         String?
+  role         UserRole  @default(VIEWER)
+  teamId       String?
+  team         Team?     @relation(fields: [teamId], references: [id])
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  // NextAuth fields
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  TEAM
+  VIEWER
+}
+
+// NextAuth required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// SEASON & TOURNAMENT STRUCTURE
+// ============================================================================
+
+model Season {
+  id          String       @id @default(cuid())
+  name        String
+  year        Int
+  description String?
+  status      SeasonStatus @default(DRAFT)
+  startDate   DateTime?
+  endDate     DateTime?
+  settings    String       @default("{}") // JSON string for auction rules, budgets, constraints
+  teams         Team[]
+  players       Player[]
+  auctions      Auction[]
+  teamStrategies TeamStrategy[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  @@unique([name, year])
+  @@map("seasons")
+}
+
+enum SeasonStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+// ============================================================================
+// TEAM & BUDGET MANAGEMENT
+// ============================================================================
+
+model Team {
+  id           String              @id @default(cuid())
+  name         String
+  displayName  String?
+  budgetTotal  Int
+  budgetSpent  Int                 @default(0)
+  seasonId     String
+  season       Season              @relation(fields: [seasonId], references: [id])
+  users        User[]
+  roster       Roster[]
+  bids         Bid[]
+  watchlist    Watchlist[]
+  transactions BudgetTransaction[]
+  strategies   TeamStrategy[]
+  lotsSold     Lot[]               @relation("SoldTo")
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  
+  @@unique([name, seasonId])
+  @@map("teams")
+}
+
+model BudgetTransaction {
+  id          String          @id @default(cuid())
+  teamId      String
+  team        Team            @relation(fields: [teamId], references: [id])
+  amount      Int             // Positive for credits, negative for debits
+  type        TransactionType
+  description String?
+  lotId       String?         // If related to auction purchase
+  createdAt   DateTime        @default(now())
+  
+  @@map("budget_transactions")
+}
+
+enum TransactionType {
+  INITIAL_BUDGET
+  TOP_UP
+  PENALTY
+  PURCHASE
+  REFUND
+}
+
+// ============================================================================
+// PLAYER & AUCTION MANAGEMENT
+// ============================================================================
+
+model Player {
+  id         String      @id @default(cuid())
+  name       String
+  country    String
+  role       PlayerRole
+  basePrice  Int
+  seasonId   String
+  season     Season      @relation(fields: [seasonId], references: [id])
+  stats      String?     @default("{}") // JSON string for player statistics
+  tags       String?     // Comma-separated tags
+  isOverseas Boolean     @default(false)
+  lots       Lot[]
+  roster     Roster[]
+  watchlist  Watchlist[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  
+  @@map("players")
+}
+
+enum PlayerRole {
+  BATSMAN
+  BOWLER
+  ALL_ROUNDER
+  WICKET_KEEPER
+}
+
+model Auction {
+  id            String        @id @default(cuid())
+  name          String
+  seasonId      String
+  season        Season        @relation(fields: [seasonId], references: [id])
+  status        AuctionStatus @default(NOT_STARTED)
+  currentLotId  String?
+  currentLot    Lot?          @relation("CurrentLot", fields: [currentLotId], references: [id])
+  settings      String        @default("{}") // JSON string for timer, increments, rules
+  lots          Lot[]         @relation("AuctionLots")
+  events        AuctionEvent[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  @@map("auctions")
+}
+
+enum AuctionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+}
+
+// ============================================================================
+// BIDDING & LOT MANAGEMENT
+// ============================================================================
+
+model Lot {
+  id           String         @id @default(cuid())
+  auctionId    String
+  auction      Auction        @relation("AuctionLots", fields: [auctionId], references: [id])
+  playerId     String
+  player       Player         @relation(fields: [playerId], references: [id])
+  status       LotStatus      @default(QUEUED)
+  currentPrice Int?
+  soldToId     String?
+  soldTo       Team?          @relation("SoldTo", fields: [soldToId], references: [id])
+  finalPrice   Int?
+  order        Int
+  startedAt    DateTime?
+  endsAt       DateTime?
+  bids         Bid[]
+  events       AuctionEvent[]
+  currentAuction Auction[]    @relation("CurrentLot")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  
+  @@unique([auctionId, order])
+  @@map("lots")
+}
+
+enum LotStatus {
+  QUEUED
+  IN_PROGRESS
+  SOLD
+  UNSOLD
+  PAUSED
+}
+
+model Bid {
+  id        String   @id @default(cuid())
+  lotId     String
+  lot       Lot      @relation(fields: [lotId], references: [id])
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  amount    Int
+  isValid   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  
+  @@map("bids")
+}
+
+model Roster {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id])
+  price     Int
+  createdAt DateTime @default(now())
+  
+  @@unique([teamId, playerId])
+  @@map("roster")
+}
+
+// ============================================================================
+// REAL-TIME EVENTS & WATCHLIST
+// ============================================================================
+
+model AuctionEvent {
+  id        String    @id @default(cuid())
+  auctionId String
+  auction   Auction   @relation(fields: [auctionId], references: [id])
+  lotId     String?
+  lot       Lot?      @relation(fields: [lotId], references: [id])
+  type      EventType
+  data      String    @default("{}") // JSON string
+  sequence  Int       // For ordering events
+  createdAt DateTime  @default(now())
+  
+  @@unique([auctionId, sequence])
+  @@map("auction_events")
+}
+
+enum EventType {
+  AUCTION_STARTED
+  AUCTION_PAUSED
+  AUCTION_RESUMED
+  AUCTION_ENDED
+  LOT_STARTED
+  BID_PLACED
+  LOT_SOLD
+  LOT_UNSOLD
+  LOT_EXTENDED
+}
+
+model Watchlist {
+  id       String   @id @default(cuid())
+  teamId   String
+  team     Team     @relation(fields: [teamId], references: [id])
+  playerId String
+  player   Player   @relation(fields: [playerId], references: [id])
+  maxBid   Int?     // Auto-bid limit
+  priority Int?     // Bidding priority
+  createdAt DateTime @default(now())
+  
+  @@unique([teamId, playerId])
+  @@map("watchlist")
+}
+
+// ============================================================================
+// TEAM STRATEGY MANAGEMENT
+// ============================================================================
+
+model TeamStrategy {
+  id             String   @id @default(cuid())
+  teamId         String
+  team           Team     @relation(fields: [teamId], references: [id])
+  seasonId       String
+  season         Season   @relation(fields: [seasonId], references: [id])
+  budget         String   @default("{}") // JSON string for budget allocations
+  roleStrategies String   @default("[]") // JSON string for role-based strategies
+  targetPlayers  String   @default("[]") // JSON string for target player list
+  generalNotes   String?  // General strategy notes
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@unique([teamId, seasonId])
+  @@map("team_strategies")
 }
