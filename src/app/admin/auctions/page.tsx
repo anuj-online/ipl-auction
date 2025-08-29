@@ -20,6 +20,7 @@ import {
   TrophyIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline'
 
 interface Auction {
@@ -169,6 +170,13 @@ export default function AuctionControlPage() {
             
             {selectedAuction && (
               <div className="flex items-center space-x-4">
+                <Link
+                  href="/admin/auctions/create"
+                  className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium flex items-center space-x-2"
+                >
+                  <PlusIcon className="h-5 w-5" />
+                  <span>Create Auction</span>
+                </Link>
                 <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(selectedAuction.status)}`}>
                   {selectedAuction.status.replace('_', ' ')}
                 </span>
@@ -228,13 +236,23 @@ export default function AuctionControlPage() {
                 {auctions.length === 0 && (
                   <div className="text-center py-8">
                     <TrophyIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600">No auctions available</p>
-                    <Link
-                      href="/admin/seasons"
-                      className="text-orange-600 hover:text-orange-700 text-sm mt-2 inline-block"
-                    >
-                      Create a season first
-                    </Link>
+                    <p className="text-gray-600 mb-4">No auctions available</p>
+                    <div className="space-y-2">
+                      <Link
+                        href="/admin/auctions/create"
+                        className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium inline-block"
+                      >
+                        Create Auction
+                      </Link>
+                      <div>
+                        <Link
+                          href="/admin/seasons"
+                          className="text-orange-600 hover:text-orange-700 text-sm"
+                        >
+                          Or manage seasons first
+                        </Link>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

@@ -36,12 +36,14 @@ export async function GET(request: NextRequest) {
     if (seasonId) whereClause.seasonId = seasonId
     if (status) whereClause.status = status
 
+    const orderByClause = { [sortBy as string]: sortOrder }
+
     const [auctions, total] = await Promise.all([
       prisma.auction.findMany({
         where: whereClause,
         skip,
         take: limit,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: orderByClause,
         include: {
           season: {
             select: {
@@ -148,10 +150,11 @@ export const POST = withAdmin(async (request: NextRequest) => {
 
   const { name, seasonId, settings } = validation.data
 
-  // Check if season exists
+  // Check if season exists and get comprehensive data
   const season = await prisma.season.findUnique({
     where: { id: seasonId },
     include: {
+      teams: true,
       players: {
         where: {
           roster: {
@@ -169,8 +172,58 @@ export const POST = withAdmin(async (request: NextRequest) => {
     return createApiResponse(undefined, 'Season not found', 404)
   }
 
-  if (season.players.length === 0) {
-    return createApiResponse(undefined, 'No available players in season for auction', 400)
+  // Ensure season has required properties
+  if (!season.teams || !Array.isArray(season.teams)) {
+    return createApiResponse(undefined, 'Season teams data not found', 500)
+  }
+  
+  if (!season.players || !Array.isArray(season.players)) {
+    return createApiResponse(undefined, 'Season players data not found', 500)
+  }
+
+  // Enhanced validation checks
+  const validationErrors: string[] = []
+  
+  // Check minimum teams requirement
+  if (season.teams.length < 2) {
+    validationErrors.push('Minimum 2 teams required for auction')
+  }
+  
+  // Check minimum players requirement
+  if (season.players.length < 20) {
+    validationErrors.push(`Insufficient players (${season.players.length} available, minimum 20 required)`)
+  }
+  
+  // Check role distribution
+  const roleDistribution = season.players.reduce((acc, player) => {
+    acc[player.role] = (acc[player.role] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+  
+  const minPlayersPerRole = Math.max(2, Math.ceil(season.teams.length / 2))
+  const missingRoles: string[] = []
+  
+  const roles: string[] = ['BATSMAN', 'BOWLER', 'ALL_ROUNDER', 'WICKET_KEEPER']
+  roles.forEach((role: string) => {
+    if ((roleDistribution[role] || 0) < minPlayersPerRole) {
+      missingRoles.push(`${role.replace('_', ' ')} (${roleDistribution[role] || 0} available, ${minPlayersPerRole} recommended)`)
+    }
+  })
+  
+  if (missingRoles.length > 0) {
+    validationErrors.push(`Insufficient players in roles: ${missingRoles.join(', ')}`)
+  }
+  
+  // Check budget sufficiency
+  const totalBudget = season.teams.reduce((sum, team) => sum + team.budgetTotal, 0)
+  const estimatedPlayerValue = season.players.reduce((sum, player) => sum + player.basePrice, 0)
+  
+  if (totalBudget < estimatedPlayerValue * 0.5) {
+    validationErrors.push('Total team budgets insufficient for player base prices')
+  }
+  
+  if (validationErrors.length > 0) {
+    return createApiResponse(undefined, `Auction setup validation failed: ${validationErrors.join('; ')}`, 400)
   }
 
   // Check for existing active auction in season
@@ -239,6 +292,13 @@ export const POST = withAdmin(async (request: NextRequest) => {
       ...fullAuction,
       settings: fullAuction!.settings ? JSON.parse(fullAuction!.settings) : {},
     },
-    message: `Auction created successfully with ${season.players.length} lots`,
+    message: `Auction created successfully with ${season.players.length} lots for ${season.teams.length} teams`,
+    stats: {
+      teams: season.teams.length,
+      players: season.players.length,
+      totalBudget,
+      estimatedValue: estimatedPlayerValue,
+      roleDistribution
+    }
   })
 })

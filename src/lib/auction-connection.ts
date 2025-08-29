@@ -235,13 +235,34 @@ class AuctionConnectionService {
       })
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || `HTTP ${response.status}`)
+        let errorMessage = `HTTP ${response.status}`
+        try {
+          const error = await response.json()
+          errorMessage = error.error || error.message || errorMessage
+        } catch (jsonError) {
+          // If response is not JSON, use the status text
+          errorMessage = response.statusText || errorMessage
+        }
+        throw new Error(errorMessage)
       }
 
-      const data = await response.json()
+      let data
+      try {
+        data = await response.json()
+      } catch (jsonError) {
+        throw new Error('Invalid JSON response from server')
+      }
+
+      if (!data.success || !data.data) {
+        throw new Error(data.error || 'Invalid response format')
+      }
+
       this.connectionId = data.data.connectionId
       const sseEndpoint = data.data.sseEndpoint
+
+      if (!this.connectionId || !sseEndpoint) {
+        throw new Error('Missing connection details in response')
+      }
 
       // Subscribe to SSE events
       await this._setupSSEConnection(sseEndpoint)
@@ -249,7 +270,8 @@ class AuctionConnectionService {
       return true
     } catch (error) {
       console.error('❌ Connection attempt failed:', error)
-      this.config?.onError?.(error instanceof Error ? error.message : 'Connection failed')
+      const errorMessage = error instanceof Error ? error.message : 'Connection failed'
+      this.config?.onError?.(errorMessage)
       this._scheduleReconnect()
       return false
     }

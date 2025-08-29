@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "ws": "WEBSOCKET_PORT=3003 node websocket-server-new.js",
+    "dev:full": "npm run ws & npm run dev",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",

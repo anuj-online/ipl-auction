@@ -1,0 +1,109 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - link "IPL Auction Pro" [ref=e7] [cursor=pointer]:
+            - /url: /admin
+            - generic [ref=e9] [cursor=pointer]: IPL
+            - generic [ref=e10] [cursor=pointer]: Auction Pro
+          - generic [ref=e11]: "|"
+          - navigation [ref=e12]:
+            - link "Dashboard" [ref=e13] [cursor=pointer]:
+              - /url: /admin
+            - generic [ref=e14]: /
+            - link "Seasons" [ref=e15] [cursor=pointer]:
+              - /url: /admin/seasons
+            - generic [ref=e16]: /
+            - generic [ref=e17]: Create
+        - link "Back to Seasons" [ref=e18] [cursor=pointer]:
+          - /url: /admin/seasons
+          - img [ref=e19] [cursor=pointer]
+          - generic [ref=e21] [cursor=pointer]: Back to Seasons
+    - main [ref=e22]:
+      - generic [ref=e23]:
+        - heading "Create New Season" [level=1] [ref=e24]
+        - paragraph [ref=e25]: Set up a new auction season with teams, budget caps, and auction rules.
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - img [ref=e29]
+            - heading "Basic Information" [level=2] [ref=e31]
+          - generic [ref=e32]:
+            - generic [ref=e33]:
+              - generic [ref=e34]: Season Name *
+              - textbox "e.g., IPL 2025" [ref=e35]
+            - generic [ref=e36]:
+              - generic [ref=e37]: Year *
+              - spinbutton [ref=e38]: "2026"
+            - generic [ref=e39]:
+              - generic [ref=e40]: Description
+              - textbox "Brief description of the season..." [ref=e41]
+            - generic [ref=e42]:
+              - generic [ref=e43]: Auction Date
+              - textbox [ref=e44]
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - img [ref=e47]
+            - heading "Team & Budget Configuration" [level=2] [ref=e49]
+          - generic [ref=e50]:
+            - generic [ref=e51]:
+              - generic [ref=e52]: Maximum Teams *
+              - spinbutton [ref=e53]: "8"
+            - generic [ref=e54]:
+              - generic [ref=e55]: Budget Cap Per Team
+              - generic [ref=e56]:
+                - spinbutton [ref=e57]: "100000000"
+                - paragraph [ref=e58]: ₹10.0 Crores
+            - generic [ref=e59]:
+              - generic [ref=e60]: Player Pool Size
+              - spinbutton [ref=e61]: "200"
+        - generic [ref=e62]:
+          - generic [ref=e63]:
+            - img [ref=e64]
+            - heading "Auction Settings" [level=2] [ref=e66]
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - generic [ref=e69]: Bid Increment
+              - generic [ref=e70]:
+                - spinbutton [ref=e71]: "500000"
+                - paragraph [ref=e72]: ₹5.0L
+            - generic [ref=e73]:
+              - generic [ref=e74]: Lot Timer (seconds)
+              - spinbutton [ref=e75]: "60"
+            - generic [ref=e76]:
+              - generic [ref=e77]: Max Bids Per Lot
+              - spinbutton [ref=e78]: "50"
+            - generic [ref=e79]:
+              - generic [ref=e80]: Auto Extension Time (seconds)
+              - spinbutton [ref=e81]: "30"
+            - generic [ref=e82]:
+              - generic [ref=e83]:
+                - checkbox "Enable Auto Extension" [checked] [ref=e84]
+                - generic [ref=e85]: Enable Auto Extension
+              - paragraph [ref=e86]: Automatically extend lot timer when bids are placed near the end
+        - generic [ref=e87]:
+          - generic [ref=e88]:
+            - img [ref=e89]
+            - heading "Roster Constraints" [level=2] [ref=e91]
+          - generic [ref=e92]:
+            - generic [ref=e93]:
+              - generic [ref=e94]: Max Squad Size
+              - spinbutton [ref=e95]: "25"
+            - generic [ref=e96]:
+              - generic [ref=e97]: Max Overseas Players
+              - spinbutton [ref=e98]: "8"
+            - generic [ref=e99]:
+              - generic [ref=e100]: Min Wicket Keepers
+              - spinbutton [ref=e101]: "2"
+        - generic [ref=e102]:
+          - link "Cancel" [ref=e103] [cursor=pointer]:
+            - /url: /admin/seasons
+          - button "Create Season" [ref=e104]
+  - button "Open Next.js Dev Tools" [ref=e110] [cursor=pointer]:
+    - img [ref=e111] [cursor=pointer]
+  - alert [ref=e114]
+```
